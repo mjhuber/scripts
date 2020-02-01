@@ -9,8 +9,10 @@ import (
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
 	"os"
+	"path/filepath"
+	"strings"
 )
-
+//go run reckoner-parse.go -i kiva -r rbac-manager
 
 // Course is a reckoner course file
 type Course struct {
@@ -26,7 +28,7 @@ type Chart struct {
 }
 
 var (
-	path     string
+	inventories []string
 	releases []string
 	all      bool
 	rootCmd  = &cobra.Command{
@@ -40,10 +42,9 @@ var (
 )
 
 func main() {
-	rootCmd.PersistentFlags().StringVarP(&path, "file", "f", "", "Path to reckoner course")
+	rootCmd.PersistentFlags().StringSliceVarP(&inventories, "inventory", "i", []string{}, "Names of inventories to search")
 	rootCmd.PersistentFlags().StringSliceVarP(&releases, "release", "r", []string{}, "Names of releases to pull")
 	rootCmd.PersistentFlags().BoolVarP(&all, "all", "a", false, "When true retrurns all releases")
-	rootCmd.MarkPersistentFlagRequired("file")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
@@ -52,31 +53,64 @@ func main() {
 }
 
 func run() {
+	dir := os.Getenv("CUDDLEFISH_PROJECTS_DIR")
+	err := filepath.Walk(dir,
+					   func(path string, info os.FileInfo, err error) error {
+						   if err != nil {
+							   return err
+						   }
+						   //fmt.Println(path, info.Size(), info.Name())
+						   if info.Name() == "course.yml" && (Matches(inventories,path)) {
+							   //fmt.Println(path)
+							   err := parseFile(path)
+							   if err != nil {
+								   fmt.Printf("\nError processing %s: %v\n\n",err)
+							   }
+						   }
+						   return nil
+					   })
+	if err != nil {
+		fmt.Println(err)
+	}
+}
+
+func parseFile(path string) error {
+	fmt.Println(path)
 	course := Course{}
 	file, err := ioutil.ReadFile(path)
 
 	if err != nil {
 		fmt.Printf("Error reading file: %v", err)
-		os.Exit(1)
+		return err
 	}
 
 	err = yaml.Unmarshal(file, &course)
 	if err != nil {
-		fmt.Printf("Error unmarshalling yaml: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	for name, chart := range course.Charts {
 		if all || Contains(releases, name) {
-			fmt.Printf("%s: %s\n", name, chart.Version)
+			fmt.Printf("\t%s: %s\n", name, chart.Version)
 		}
 	}
+	return nil
 }
 
 // Contains returns true if name is in items
 func Contains(items []string, name string) bool {
 	for _, item := range items {
 		if name == item {
+			return true
+		}
+	}
+	return false
+}
+
+// Matches returns true if any substrings in items are in name
+func Matches(items []string, name string) bool {
+	for _, item := range items {
+		if item == "*" || strings.Contains(name, item) {
 			return true
 		}
 	}
